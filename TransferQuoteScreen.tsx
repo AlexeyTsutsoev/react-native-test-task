@@ -35,11 +35,12 @@ export function TransferQuoteScreen({onContinue, requestQuote = fetchQuote, trac
       const nextQuote = await requestQuote(amount);
       if (requestId === latestRequestIdRef.current) {
         setQuote(nextQuote);
-        trackEvent('quote_shown', {attempt});
+        trackEvent('quote_result', {attempt, outcome: 'shown'});
       }
     } catch {
       if (requestId === latestRequestIdRef.current) {
         setHasError(true);
+        trackEvent('quote_result', {attempt, outcome: 'failed'});
       }
     } finally {
       if (requestId === latestRequestIdRef.current) {
@@ -64,9 +65,9 @@ export function TransferQuoteScreen({onContinue, requestQuote = fetchQuote, trac
 
 
   useEffect(() => {
-    // Pending requests become stale on unmount, so they can't report a quote nobody saw.
-    return () => { 
-      latestRequestIdRef.current++; 
+    // Pending requests become stale on unmount, so they can't report a result nobody saw.
+    return () => {
+      latestRequestIdRef.current += 1;
     };
   }, []);
 

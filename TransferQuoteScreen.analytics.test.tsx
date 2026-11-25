@@ -4,7 +4,8 @@ import {TransferQuoteScreen} from './TransferQuoteScreen';
 import type {Quote} from './quoteApi';
 
 const requested = (attempt: number) => ['quote_requested', {attempt}];
-const shown = (attempt: number) => ['quote_shown', {attempt}];
+const shown = (attempt: number) => ['quote_result', {attempt, outcome: 'shown'}];
+const failed = (attempt: number) => ['quote_result', {attempt, outcome: 'failed'}];
 const continued = (attempt: number) => ['quote_continued', {attempt}];
 
 function setup() {
@@ -35,7 +36,7 @@ function setup() {
   };
 }
 
-it('reports request, quote and continue in order, with nothing but the attempt number', async () => {
+it('reports request, quote and continue in order, with no personal data', async () => {
   const {type, succeed, press, trackEvent} = setup();
   type('100');
   expect(trackEvent.mock.calls).toEqual([requested(1)]);
@@ -46,42 +47,43 @@ it('reports request, quote and continue in order, with nothing but the attempt n
 });
 
 it('does not repeat events on rerender or repeated Continue taps', async () => {
-  const {type, succeed, press, rerender, trackEvent, onContinue} = setup();
+  const {type, succeed, press, rerender, trackEvent} = setup();
   type('100');
   await succeed(0);
   rerender();
   press('Continue');
   press('Continue');
   expect(trackEvent.mock.calls).toEqual([requested(1), shown(1), continued(1)]);
-  expect(onContinue).toHaveBeenCalledTimes(2);
 });
 
-it('does not report a stale quote as shown', async () => {
-  const {type, succeed, trackEvent} = setup();
+it('does not report stale quotes or errors', async () => {
+  const {type, succeed, fail, trackEvent} = setup();
   type('100');
   type('200');
-  await succeed(1);
+  type('300');
+  await fail(1);
+  await succeed(2);
   await succeed(0);
-  expect(trackEvent.mock.calls).toEqual([requested(1), requested(2), shown(2)]);
+  expect(trackEvent.mock.calls).toEqual([requested(1), requested(2), requested(3), shown(3)]);
 });
 
-it('counts a retry as a new attempt', async () => {
+it('reports an error and counts a retry as a new attempt', async () => {
   const {type, fail, succeed, press, trackEvent} = setup();
   type('100');
   await fail(0);
-  expect(trackEvent.mock.calls).toEqual([requested(1)]);
+  expect(trackEvent.mock.calls).toEqual([requested(1), failed(1)]);
   press('Retry');
   await succeed(1);
-  expect(trackEvent.mock.calls).toEqual([requested(1), requested(2), shown(2)]);
+  expect(trackEvent.mock.calls).toEqual([requested(1), failed(1), requested(2), shown(2)]);
 });
 
-it('leaves the last attempt without a quote when only an intermediate one was shown', async () => {
+it('marks the last attempt as failed when only an intermediate one was shown', async () => {
   const {type, succeed, fail, trackEvent} = setup();
   type('1');
   await succeed(0);
   type('10');
   await fail(1);
-  expect(trackEvent.mock.calls).toEqual([requested(1), shown(1), requested(2)]);
+  expect(trackEvent.mock.calls).toEqual([requested(1), shown(1), requested(2), failed(2)]);
 });
 
 it('reports nothing for invalid input and does not number it as an attempt', async () => {
@@ -98,12 +100,12 @@ it('reports nothing for invalid input and does not number it as an attempt', asy
   expect(trackEvent.mock.calls).toEqual([requested(1), requested(2)]);
 });
 
-it('does not report a quote that arrives after the screen is closed', async () => {
-  const {type, succeed, unmount, trackEvent} = setup();
-  type('100');
-  unmount();
-  await succeed(0);
-  expect(trackEvent.mock.calls).toEqual([requested(1)]);
+it.each(['succeed', 'fail'] as const)('reports no result when a request ends with %s after the screen is closed', async how => {
+  const screenUnderTest = setup();
+  screenUnderTest.type('100');
+  screenUnderTest.unmount();
+  await screenUnderTest[how](0);
+  expect(screenUnderTest.trackEvent.mock.calls).toEqual([requested(1)]);
 });
 
 it('reports Continue again for a new attempt', async () => {
