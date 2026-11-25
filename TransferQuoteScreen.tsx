@@ -1,4 +1,4 @@
-import React, {useState} from 'react';
+import React, {useEffect, useRef, useState} from 'react';
 import {ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View} from 'react-native';
 import {fetchQuote, type Quote, type RequestQuote} from './quoteApi';
 import {track, type Track} from './analytics';
@@ -11,24 +11,65 @@ export function TransferQuoteScreen({onContinue, requestQuote = fetchQuote, trac
   const [loading, setLoading] = useState(false);
   const [hasError, setHasError] = useState(false);
 
+  const latestRequestIdRef = useRef(0);
+  const attemptRef = useRef(0);
+  const continuedAttemptRef = useRef(0);
+
   async function getQuote(text: string) {
+    // Any new input, even an invalid one, should make pending requests stale.
+    const requestId = ++latestRequestIdRef.current;
     const amount = Number(text.trim().replace(',', '.'));
     setHasError(false);
+    setQuote(null);
+
     if (!Number.isFinite(amount) || amount <= 0) {
-      setQuote(null);
       setLoading(false);
       return;
     }
     setLoading(true);
+
+    const attempt = ++attemptRef.current;
+    trackEvent('quote_requested', {attempt});
+    
     try {
-      setQuote(await requestQuote(amount));
+      const nextQuote = await requestQuote(amount);
+      if (requestId === latestRequestIdRef.current) {
+        setQuote(nextQuote);
+        trackEvent('quote_result', {attempt, outcome: 'shown'});
+      }
     } catch {
-      setQuote(null);
-      setHasError(true);
+      if (requestId === latestRequestIdRef.current) {
+        setHasError(true);
+        trackEvent('quote_result', {attempt, outcome: 'failed'});
+      }
     } finally {
-      setLoading(false);
+      if (requestId === latestRequestIdRef.current) {
+        setLoading(false);
+      }
     }
   }
+
+  function handleContinue() {
+    if (!quote || loading) {
+       return;
+    }
+
+    // A visible quote always belongs to the latest attempt. Repeated taps are reported once.
+    if (continuedAttemptRef.current !== attemptRef.current) {
+      continuedAttemptRef.current = attemptRef.current;
+      trackEvent('quote_continued', {attempt: attemptRef.current});
+    }
+    
+    onContinue(quote.id);
+  }
+
+
+  useEffect(() => {
+    // Pending requests become stale on unmount, so they can't report a result nobody saw.
+    return () => {
+      latestRequestIdRef.current += 1;
+    };
+  }, []);
 
   const canContinue = Boolean(quote) && !loading;
 
@@ -72,9 +113,7 @@ export function TransferQuoteScreen({onContinue, requestQuote = fetchQuote, trac
         accessibilityRole="button"
         disabled={!canContinue}
         style={({pressed}) => [styles.button, !canContinue && styles.buttonDisabled, pressed && styles.buttonPressed]}
-        onPress={() => {
-          if (quote && !loading) onContinue(quote.id);
-        }}>
+        onPress={handleContinue}>
         <Text style={[styles.buttonText, !canContinue && styles.buttonTextDisabled]}>Continue</Text>
       </Pressable>
     </View>
