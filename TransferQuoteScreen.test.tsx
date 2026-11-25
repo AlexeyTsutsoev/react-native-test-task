@@ -28,3 +28,20 @@ it('shows a retry option after a quote error', async () => {
   expect(requestQuote.mock.calls).toEqual([[100], [100]]);
   expect(screen.getByText('Rate: 89 INR/EUR')).toBeTruthy();
 });
+
+it('ignores an older quote that arrives after the current one', async () => {
+  const resolvers = new Map<number, (quote: Quote) => void>();
+  const requestQuote = (amount: number) => new Promise<Quote>(resolve => { resolvers.set(amount, resolve); });
+  const onContinue = jest.fn();
+  render(<TransferQuoteScreen requestQuote={requestQuote} onContinue={onContinue} />);
+  fireEvent.changeText(screen.getByLabelText('Amount in EUR'), '100');
+  fireEvent.changeText(screen.getByLabelText('Amount in EUR'), '200');
+
+  await act(async () => { resolvers.get(200)!({id: 'q-200', amount: 200, rate: 90, fee: 3}); });
+  await act(async () => { resolvers.get(100)!({id: 'q-100', amount: 100, rate: 89, fee: 2}); });
+
+  expect(screen.getByText('Rate: 90 INR/EUR')).toBeTruthy();
+  expect(screen.queryByText('Rate: 89 INR/EUR')).toBeNull();
+  fireEvent.press(screen.getByRole('button', {name: 'Continue'}));
+  expect(onContinue.mock.calls).toEqual([['q-200']]);
+});
