@@ -45,3 +45,47 @@ it('ignores an older quote that arrives after the current one', async () => {
   fireEvent.press(screen.getByRole('button', {name: 'Continue'}));
   expect(onContinue.mock.calls).toEqual([['q-200']]);
 });
+
+it('keeps only the last of many quotes that arrive out of order', async () => {
+  const requests = new Map<number, {resolve: (quote: Quote) => void; reject: (error: Error) => void}>();
+  const requestQuote = (amount: number) => new Promise<Quote>((resolve, reject) => {
+    requests.set(amount, {resolve, reject});
+  });
+  const succeed = (amount: number) => act(async () => {
+    requests.get(amount)!.resolve({id: `q-${amount}`, amount, rate: amount, fee: 2});
+  });
+  const fail = (amount: number) => act(async () => { requests.get(amount)!.reject(new Error('Offline')); });
+  const type = (amount: number) => fireEvent.changeText(screen.getByLabelText('Amount in EUR'), String(amount));
+  const pressContinue = () => fireEvent.press(screen.getByRole('button', {name: 'Continue'}));
+  const expectLoading = () => {
+    expect(screen.queryByText(/^Rate:/)).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByLabelText('Loading quote')).toBeTruthy();
+    pressContinue();
+    expect(onContinue).not.toHaveBeenCalled();
+  };
+  const onContinue = jest.fn();
+  render(<TransferQuoteScreen requestQuote={requestQuote} onContinue={onContinue} />);
+
+  // A quote is already on screen; new input hides it right away.
+  type(100);
+  await succeed(100);
+  expect(screen.getByText('Rate: 100 INR/EUR')).toBeTruthy();
+  for (const amount of [200, 300, 400, 500, 600]) type(amount);
+  expectLoading();
+
+  // Stale answers and errors before the current one change nothing.
+  await succeed(300);
+  expectLoading();
+  await fail(500);
+  expectLoading();
+
+  // Nor do they after it.
+  await succeed(600);
+  await succeed(200);
+  await fail(400);
+  expect(screen.getByText('Rate: 600 INR/EUR')).toBeTruthy();
+  expect(screen.queryByRole('alert')).toBeNull();
+  pressContinue();
+  expect(onContinue.mock.calls).toEqual([['q-600']]);
+});
