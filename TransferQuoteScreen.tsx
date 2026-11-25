@@ -1,4 +1,4 @@
-import React, {useState} from 'react';
+import React, {useRef, useState} from 'react';
 import {ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View} from 'react-native';
 import {fetchQuote, type Quote, type RequestQuote} from './quoteApi';
 import {track, type Track} from './analytics';
@@ -11,22 +11,33 @@ export function TransferQuoteScreen({onContinue, requestQuote = fetchQuote, trac
   const [loading, setLoading] = useState(false);
   const [hasError, setHasError] = useState(false);
 
+  const latestRequestIdRef = useRef(0);
+
   async function getQuote(text: string) {
+    // Any new input, even an invalid one, should make pending requests stale.
+    const requestId = ++latestRequestIdRef.current;
     const amount = Number(text.trim().replace(',', '.'));
     setHasError(false);
+    setQuote(null);
+
     if (!Number.isFinite(amount) || amount <= 0) {
-      setQuote(null);
       setLoading(false);
       return;
     }
     setLoading(true);
     try {
-      setQuote(await requestQuote(amount));
+      const nextQuote = await requestQuote(amount);
+      if (requestId === latestRequestIdRef.current) {
+        setQuote(nextQuote);
+      }
     } catch {
-      setQuote(null);
-      setHasError(true);
+      if (requestId === latestRequestIdRef.current) {
+        setHasError(true);
+      }
     } finally {
-      setLoading(false);
+      if (requestId === latestRequestIdRef.current) {
+        setLoading(false);
+      }
     }
   }
 
